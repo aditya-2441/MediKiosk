@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+websockets
+pydantic
+fhir.resources
+google-genai
+pymysql
+sqlalchemy
+python-dotenv
