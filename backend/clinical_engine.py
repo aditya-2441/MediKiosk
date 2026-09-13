@@ -1,151 +1,116 @@
-"""Typed clinical intake state machine for the MediKiosk interview flow."""
+import os
+import json
+from typing import List, Optional
+from pydantic import BaseModel, Field
+from groq import Groq
+from dotenv import load_dotenv
 
-from __future__ import annotations
+load_dotenv()
 
-from enum import Enum
-from typing import Any
+# Automatically detects GROQ_API_KEY from the environment
+client = Groq()
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+class AyushParameters(BaseModel):
+    prakriti_clues: List[str] = Field(default_factory=list, description="Vata/Pitta/Kapha physical & mental attributes")
+    agni_status: Optional[str] = Field(None, description="Tikshnagni, Mandagni, Vishamagni, or Samagni")
+    ahara_vihara: List[str] = Field(default_factory=list, description="Dietary habits, sleep cycle, lifestyle triggers")
 
+class SocratesParameters(BaseModel):
+    site: Optional[str] = Field(None, description="Where is the symptom located?")
+    onset: Optional[str] = Field(None, description="When and how did it start?")
+    character: Optional[str] = Field(None, description="How does it feel?")
+    radiation: Optional[str] = Field(None, description="Does the pain spread anywhere?")
+    associations: Optional[str] = Field(None, description="Any other associated symptoms?")
+    time_course: Optional[str] = Field(None, description="Does it follow any pattern over time?")
+    exacerbating_relieving: Optional[str] = Field(None, description="What makes it better or worse?")
+    severity: Optional[str] = Field(None, description="How severe is it on a scale of 1-10?")
+    medications_allergies: Optional[str] = Field(None, description="Any current medications or allergies?")
 
-class InterviewPhase(str, Enum):
-    GREETING = "greeting"
-    DEMOGRAPHICS = "demographics"
-    CHIEF_COMPLAINT = "chief_complaint"
-    SOCRATES = "socrates"
-    DASHAVIDHA_PARIKSHA = "dashavidha_pariksha"
-    MEDICATIONS_AND_HISTORY = "medications_and_history"
-    REVIEW = "review"
-    PRIORITY_BYPASS = "priority_bypass"
-    COMPLETE = "complete"
-
-
-class SocratesHistory(BaseModel):
-    """Allopathic symptom history using the SOCRATES framework."""
-
-    site: str | None = None
-    onset: str | None = None
-    character: str | None = None
-    radiation: str | None = None
-    associations: list[str] = Field(default_factory=list)
-    timing: str | None = None
-    exacerbating_factors: list[str] = Field(default_factory=list)
-    relieving_factors: list[str] = Field(default_factory=list)
-    severity: int | None = Field(default=None, ge=0, le=10)
-
-
-class DashavidhaPariksha(BaseModel):
-    """Ayurvedic ten-fold examination fields relevant to a kiosk intake."""
-
-    prakriti: str | None = None
-    vikriti: str | None = None
-    sara: str | None = None
-    samhanana: str | None = None
-    pramana: str | None = None
-    satmya: str | None = None
-    sattva: str | None = None
-    ahara_shakti: str | None = None
-    vyayama_shakti: str | None = None
-    vaya: str | None = None
-    agni: str | None = None
-    ahara_vihara: list[str] = Field(default_factory=list)
-
-
-class Demographics(BaseModel):
-    name: str | None = None
-    age: int | None = Field(default=None, ge=0, le=130)
-    sex: str | None = None
-    preferred_language: str | None = None
-    contact_number: str | None = None
-
-
-class ClinicalHistory(BaseModel):
-    demographics: Demographics = Field(default_factory=Demographics)
-    chief_complaint: str | None = None
-    socrates: SocratesHistory = Field(default_factory=SocratesHistory)
-    dashavidha_pariksha: DashavidhaPariksha = Field(default_factory=DashavidhaPariksha)
-    past_medical_history: list[str] = Field(default_factory=list)
-    current_medications: list[str] = Field(default_factory=list)
-    allergies: list[str] = Field(default_factory=list)
-    family_history: list[str] = Field(default_factory=list)
-    social_history: list[str] = Field(default_factory=list)
-
-
-class ClinicalInterviewState(BaseModel):
-    model_config = ConfigDict(validate_assignment=True)
-
+class ClinicalState(BaseModel):
     session_id: str
-    phase: InterviewPhase = InterviewPhase.GREETING
-    history: ClinicalHistory = Field(default_factory=ClinicalHistory)
-    red_flags: list[str] = Field(default_factory=list)
-    priority_bypass: bool = False
-    transcript: list[str] = Field(default_factory=list)
-    audio_bytes_received: int = Field(default=0, ge=0)
+    language: str
+    mode: str
+    step: int
+    chief_complaint: Optional[str] = Field(None)
+    socrates: SocratesParameters = Field(default_factory=SocratesParameters)
+    ayush: AyushParameters = Field(default_factory=AyushParameters)
+    red_flags: List[str] = Field(default_factory=list)
+    is_emergency: bool = Field(False)
+    next_question: str = Field(description="The next conversational question to ask the patient based on clinical logic.")
+    suggested_quick_replies: List[str] = Field(description="2 to 4 short, tap-able reply options for the touch UI.")
 
-    @field_validator("red_flags")
-    @classmethod
-    def unique_red_flags(cls, value: list[str]) -> list[str]:
-        return list(dict.fromkeys(flag.strip() for flag in value if flag.strip()))
+def evaluate_intake_step(current_state: ClinicalState, user_input: str) -> ClinicalState:
+    schema_json = json.dumps(ClinicalState.model_json_schema())
+    
+    system_prompt = f"""
+    You are MediKiosk's backend clinical intake state machine. Your role is history-taking only; do not provide medical advice or diagnoses.
+    You must output valid JSON adhering strictly to this schema:
+    {schema_json}
+    Do not include markdown formatting, code blocks, or preamble. Return raw JSON only.
+    """
+    
+    user_prompt = f"""
+    Current Clinical State:
+    {current_state.model_dump_json()}
 
-    def add_red_flags(self, flags: list[str]) -> None:
-        self.red_flags = list(dict.fromkeys([*self.red_flags, *flags]))
-        if self.red_flags:
-            self.priority_bypass = True
-            self.phase = InterviewPhase.PRIORITY_BYPASS
+    Latest Patient Input: "{user_input}"
 
+    Instructions:
+    1. Extract clinical facts from the patient's input and update any null fields in SocratesParameters or AyushParameters.
+    2. Check for Red Flags (e.g., crushing chest pain radiating to left arm). If present, set is_emergency=True, add to red_flags, and immediately make next_question direct them to emergency triage.
+    3. Enforce Strict Multi-Phase Progression & Pacing:
+       - Phase 1: Core Symptoms. Ask one symptom question at a time.
+       - Phase 2: Chat Termination. YOU MUST STOP ASKING QUESTIONS HERE. The UI will handle document uploads and identity verification on separate screens.
+    4. Intake Termination:
+       - Once the core symptoms are gathered, set next_question to a concise closing transition: "Thank you. Let's proceed to upload your medical documents."
+       - Set suggested_quick_replies to exactly ["Proceed to Documents"] (Translate to "दस्तावेज़ अपलोड पर जाएं" if current_state.language is 'hi').
+       - Otherwise, increment the 'step' value by 1 and formulate the next conversational question based on missing parameters.
+    5. Language Enforcement:
+       - You MUST generate the 'next_question' and all 'suggested_quick_replies' in the language specified by current_state.language.
+       - If current_state.language is "hi", use simple, everyday conversational Hindi with uncomplicated vocabulary. Do not use overly complex or academic medical jargon.
+    """
+    
+    response = client.chat.completions.create(
+        model="openai/gpt-oss-120b",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        temperature=0.1,
+        response_format={"type": "json_object"}
+    )
+    
+    raw_content = response.choices[0].message.content.strip()
+    
+    if raw_content.startswith("```"):
+        lines = raw_content.splitlines()
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        raw_content = "\n".join(lines).strip()
+    
+    return ClinicalState.model_validate_json(raw_content)
 
-class ClinicalInterviewStateMachine:
-    """Deterministic FSM that keeps the interview safe and resumable."""
-
-    _phase_order = [
-        InterviewPhase.GREETING,
-        InterviewPhase.DEMOGRAPHICS,
-        InterviewPhase.CHIEF_COMPLAINT,
-        InterviewPhase.SOCRATES,
-        InterviewPhase.DASHAVIDHA_PARIKSHA,
-        InterviewPhase.MEDICATIONS_AND_HISTORY,
-        InterviewPhase.REVIEW,
-        InterviewPhase.COMPLETE,
-    ]
-    _red_flag_phrases: dict[str, tuple[str, ...]] = {
-        "chest pain": ("chest pain", "pressure in chest", "tightness in chest"),
-        "stroke symptoms": ("face drooping", "speech difficulty", "unable to speak", "one-sided weakness"),
-        "severe breathing difficulty": ("cannot breathe", "can't breathe", "severe breathlessness"),
-        "loss of consciousness": ("passed out", "lost consciousness", "unconscious"),
-        "severe bleeding": ("uncontrolled bleeding", "bleeding heavily", "blood won't stop"),
-        "suicidal thoughts": ("want to die", "suicidal", "kill myself"),
-    }
-
-    def __init__(self, session_id: str):
-        self.state = ClinicalInterviewState(session_id=session_id)
-
-    def add_audio_bytes(self, byte_count: int) -> ClinicalInterviewState:
-        if byte_count < 0:
-            raise ValueError("byte_count cannot be negative")
-        self.state.audio_bytes_received += byte_count
-        return self.state
-
-    def ingest_transcript(self, text: str) -> ClinicalInterviewState:
-        normalized = " ".join(text.lower().split())
-        if not normalized:
-            return self.state
-        self.state.transcript.append(text.strip())
-        detected = [
-            label
-            for label, phrases in self._red_flag_phrases.items()
-            if any(phrase in normalized for phrase in phrases)
-        ]
-        if detected:
-            self.state.add_red_flags(detected)
-        return self.state
-
-    def advance(self) -> ClinicalInterviewState:
-        if self.state.priority_bypass:
-            return self.state
-        current_index = self._phase_order.index(self.state.phase)
-        if current_index < len(self._phase_order) - 1:
-            self.state.phase = self._phase_order[current_index + 1]
-        return self.state
-
-    def snapshot(self) -> dict[str, Any]:
-        return self.state.model_dump(mode="json")
+def generate_soap_note(state: ClinicalState, scanned_doc: Optional[dict] = None) -> str:
+    """Takes the final raw JSON state and formatted document data, merging them into a professional clinical SOAP note."""
+    
+    doc_info = f"\n\nExtracted Medical Document Data:\n{json.dumps(scanned_doc)}" if scanned_doc else "\n\nNo medical documents provided."
+    
+    prompt = f"""
+    Convert the following raw patient data into a clean, professional medical SOAP note (Subjective, Objective, Assessment, Plan).
+    Use strict markdown formatting. Make it highly scannable for a busy doctor's dashboard.
+    
+    Data: {state.model_dump_json()}
+    {doc_info}
+    """
+    
+    response = client.chat.completions.create(
+        model="openai/gpt-oss-120b",
+        messages=[
+            {"role": "system", "content": "You are an expert clinical medical scribe."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.1
+    )
+    return response.choices[0].message.content
