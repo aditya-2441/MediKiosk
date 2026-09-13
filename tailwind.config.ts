@@ -2,9 +2,9 @@ import type { Config } from "tailwindcss";
 
 const config: Config = {
   content: [
-    "./pages/**/*.{js,ts,jsx,tsx,mdx}",
-    "./components/**/*.{js,ts,jsx,tsx,mdx}",
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
+    "./components/**/*.{js,ts,jsx,tsx,mdx}",
+    "./pages/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
     extend: {
@@ -14,10 +14,6 @@ const config: Config = {
       },
     },
   },
-  plugins: [
-    // Next.js and Tailwind highly recommend this plugin to ensure 
-    // your CSS works correctly across all browsers in production
-    require('autoprefixer'),
-  ],
+  plugins: [], // Keep this empty! Autoprefixer is already handled by PostCSS.
 };
 export default config;
