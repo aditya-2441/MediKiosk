@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+motor
+dnspython
+pydantic
+groq
+google-generativeai
+python-dotenv
+python-multipart

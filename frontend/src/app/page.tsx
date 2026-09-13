@@ -141,7 +141,7 @@ export default function KioskPage() {
   const startSession = async (mode: "ALLOPATHY" | "AYUSH") => {
     setLoading(true); setScreen("INTAKE");
     try {
-      const res = await axios.post(`http://localhost:8000/api/intake/init?mode=${mode}&language=${lang}`);
+      const res = await axios.post(`/api/intake/init?mode=${mode}&language=${lang}`);
       setState(res.data);
     } catch (err) { setScreen("OPD"); } finally { setLoading(false); }
   };
@@ -161,7 +161,7 @@ export default function KioskPage() {
     
     setLoading(true);
     try {
-      const res = await axios.post("http://localhost:8000/api/intake/message", { state: state, user_input: message });
+      const res = await axios.post("/api/intake/message", { state: state, user_input: message });
       setState(res.data);
       setInputVal("");
     } catch (err) { console.error(err); } finally { setLoading(false); }
@@ -176,7 +176,7 @@ export default function KioskPage() {
     formData.append("file", file);
 
     try {
-      const res = await axios.post("http://localhost:8000/api/intake/scan-document", formData, {
+      const res = await axios.post("/api/intake/scan-document", formData, {
         headers: { "Content-Type": "multipart/form-data" }
       });
       setScannedDocData(res.data); // Store locally on the frontend
@@ -197,7 +197,7 @@ export default function KioskPage() {
   const finalizeVerification = async () => {
     setScreen("SUCCESS");
     try {
-      await axios.post("http://localhost:8000/api/intake/finalize", {
+      await axios.post("/api/intake/finalize", {
         state: state,
         identity: { type: verifyStep === "INPUT_ABHA" ? "ABHA" : "AADHAAR_OR_PHONE", value: idNumber },
         scanned_doc: scannedDocData // Passes the stored Gemini vision response back to the server

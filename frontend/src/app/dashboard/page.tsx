@@ -18,7 +18,7 @@ export default function DoctorDashboard() {
 
   const fetchEncounters = async () => {
     try {
-      const res = await axios.get("http://localhost:8000/api/encounters");
+      const res = await axios.get("/api/encounters");
       setEncounters(res.data.data);
       setLoading(false);
     } catch (error) {
