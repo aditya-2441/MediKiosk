@@ -1,4 +1,5 @@
 import os
+import sys
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -7,6 +8,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
+
+# --- VERCEL PATH FIX ---
+# Ensures Python can find local modules (clinical_engine, document_parser) inside the api directory
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.append(current_dir)
 
 # Load environment variables FIRST so os.getenv can see them
 load_dotenv()
