@@ -1,5 +1,12 @@
 import os
 import sys
+
+# --- CRITICAL VERCEL PATH FIX ---
+# Must use insert(0) so Python checks the api/ folder FIRST before anything else
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -8,12 +15,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
-
-# --- VERCEL PATH FIX ---
-# Ensures Python can find local modules (clinical_engine, document_parser) inside the api directory
-current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.append(current_dir)
 
 # Load environment variables FIRST so os.getenv can see them
 load_dotenv()
@@ -34,7 +35,6 @@ app.add_middleware(
 )
 
 # --- MONGODB SETUP ---
-# Connects to MongoDB Atlas using the URI in your .env file
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
 db_client = AsyncIOMotorClient(MONGO_URI)
 db = db_client.medikiosk_db
@@ -64,7 +64,6 @@ def root():
 def initialize_intake(mode: str = "ALLOPATHY", language: str = "en"):
     session_id = f"kiosk-{uuid.uuid4().hex[:8]}"
     
-    # Set localized initial prompt and options based on the language toggle
     if language == "hi":
         initial_question = "नमस्ते, आज आप अस्पताल किस मुख्य समस्या के लिए आए हैं?"
         quick_replies = [
@@ -127,10 +126,8 @@ async def upload_and_parse_document(file: UploadFile = File(...)):
 async def finalize_and_save_encounter(payload: FinalizeRequest):
     """Generates the SOAP note and saves the full record to MongoDB for the Dashboard."""
     try:
-        # 1. Ask Groq to summarize the JSON state and scanned documents into a professional SOAP Note
         soap_note = generate_soap_note(payload.state, payload.scanned_doc)
         
-        # 2. Build the final database document
         encounter_record = {
             "session_id": payload.state.session_id,
             "patient_identity": {
@@ -146,7 +143,6 @@ async def finalize_and_save_encounter(payload: FinalizeRequest):
             "status": "WAITING_FOR_DOCTOR"
         }
         
-        # 3. Save asynchronously to MongoDB
         await encounters_collection.insert_one(encounter_record)
         
         return {"status": "success", "message": "Encounter saved to Dashboard"}
@@ -162,11 +158,9 @@ async def finalize_and_save_encounter(payload: FinalizeRequest):
 async def get_encounters():
     """Fetches all patient encounters for the Doctor's Dashboard."""
     try:
-        # Fetch the latest 50 encounters, sorted by newest first
         cursor = encounters_collection.find().sort("timestamp", -1)
         encounters = await cursor.to_list(length=50)
         
-        # MongoDB ObjectIds are not JSON serializable by default, so we convert them to strings
         for encounter in encounters:
             encounter["_id"] = str(encounter["_id"])
             
